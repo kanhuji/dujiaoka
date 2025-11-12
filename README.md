@@ -114,6 +114,83 @@ Telegram: [https://t.me/dujiaoka](https://t.me/dujiaoka)
 - 默认管理员账号 `admin`
 - 默认管理员密码 `admin`
 
+## 建立Docker开发环境
+建立不影响宿主机系统的Docker开发环境，建议使用一个现成的基于LNMP的Docker脚本: [https://github.com/kanhuji/docker-lnmp](https://github.com/kanhuji/docker-lnmp)，按照步骤来即可，注意新建network的时候，可能会发现端口被占用，用`docker network prune`先移除之前留下的network。用外部的network的原因是不需要每次运行一遍`docker compose down`来移除所有容器和network，可以直接重启安装所有容器继续测试
+
+在`docker-lnmp`项目里修改`.env`文件，指定目标文件夹的位置，这里是吧`dujiaoka`和`docker-lnmp`放在同一个目录下
+```dotnetcli
+WEB_ROOT_PATH=../dujiaoka
+```
+
+在宿主机上编译`dujiaoka`项目，根据PHP的版本先安装一些必要的PHP的组件
+```dotnetcli
+apt install php7.4-common php7.4-mysql php7.4-xml php7.4-xmlrpc php7.4-curl php7.4-gd php7.4-imagick php7.4-cli php7.4-dev php7.4-imap php7.4-mbstring php7.4-opcache php7.4-soap php7.4-zip php7.4-intl php7.4-bcmath -y
+```
+
+递归改变`dujiaoka`项目里面`storage/`文件夹的权限，用于实时加入存储和写入日志，不设置会导致无法安装。整个`dujiaoka`项目文件会被同步复制到nginx容器的`/var/www`文件夹里面，容器运行以后两边的文件会实时同步，包括文件权限也会同步。
+```dotnetcli
+chmod -R 777 storage/
+```
+
+编译项目
+```dotnetcli
+composer install
+```
+
+去`docker-lnmp`项目里面修改nginx配置文件，路径是`nginx/conf.d/default.conf`，注意PHP的端口被改到了9074，不同PHP版本对应不同的端口
+```nginx
+server {
+    listen          80;
+    server_name     localhost;
+
+    index index.html index.htm index.php default.html default.htm default.php;
+    root   /var/www/public;
+
+    access_log /dev/stdout;
+    error_log /dev/stderr warn;
+
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Content-Type-Options "nosniff";
+
+    index index.html index.htm index.php;
+
+    charset utf-8;
+    
+    client_max_body_size 10M;
+
+    location / {
+        try_files $uri $uri/ /index.php$is_args$query_string;  
+    }
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location = /robots.txt  { access_log off; log_not_found off; }
+
+    error_page 404 /index.php;
+
+    location ~ \.php$ {
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass php74:9074;
+        fastcgi_index index.php;
+        fastcgi_param  SCRIPT_FILENAME  $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+}
+
+```
+
+开始运行所有容器
+```dotnetcli
+docker-compose up -d --build php74 nginx mysql redis
+```
+
+打开网站`127.0.0.1`开始安装，如果前面在`dujiaoka`项目中安装过，需要先手动删除`install.lock`再安装。MYSQL数据库地址填写mysql，Redis连接地址填写redis，也可以填写具体分配的地址。
+
+可能会遇到以下错误:
+`file_put_contents(/var/www/.env): failed to open stream: Permission denied`
+去`dujiaoka`项目里面加个权限，注意不要在生产环境这样操作，只适用于本地测试，运行`chmod 777 .env`
+
+
 ## 免责声明
 
 独角数卡程序是免费开源的产品，仅用于学习交流使用！       
